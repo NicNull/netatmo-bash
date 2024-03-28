@@ -9,29 +9,58 @@
 ## Get the CLIENT_ID/SECRET by login to dev.netatmo.com myApps/Create 
 ## Station MAC address is avialable in my.netatmo.com Settings/Manage Home/RoomName/MAC Address
 ## 
-## For login redirect URI a public available web server running netatmo.php is required for the OATH process.
-## An example netatmo.php file and nginx configuration is provided as well.
+## For login redirect URI a local listening socket is used for the OATH process.
+## This requires script to be run on the same host as the webbrowser used for auth.
+## It is also possible to skip auto capture and manually enter the return code copied from the response URI:
+## http://127.0.0.1:1337/?code=<your code is here>
 ##
-REDIR_URL="<your webserver URL>"
+
+REDIR_URL="http://127.0.0.1:1337"
 STATION="##:##:##:##:##:##"
 CLIENT_ID="########################"
 CLIENT_SECRET="###################################"
 PRINT=1
-DEBUG=1
+DEBUG=0
 
+# Function to handle Ctrl-C (SIGINT)
+cleanup() {
+    echo -e "\r[WARN]   Aborted redirect URI snoop."
+    trap - SIGINT
+}
 
-#Login only first time to get token credential file
+# Trap Ctrl-C and call the cleanup function
+trap cleanup SIGINT
+
+#
+# URI redirect response
+#
+REPLY=$(cat <<EOF
+HTTP/1.1 303 Found
+Location: https://home.netatmo.com/
+Content-Type: text/html
+EOF
+)
+
+#
+# Login only first time to get token credential file
+#
 function loginAuth
 {
-  echo "Go to this URL to get auth code:"
-  echo "https://api.netatmo.com/oauth2/authorize?client_id=$CLIENT_ID&redirect_uri=https://$REDIR_URL/netatmo.php&scope=read_station" 
+  echo "[INFO]   Go to this URL to get auth code:"
+  echo "[ACTION] https://api.netatmo.com/oauth2/authorize?client_id=$CLIENT_ID&redirect_uri=${REDIR_URL}&scope=read_station" 
   echo
-  read -p "Enter code: " CODE 
+  echo "[LOGIN]  Listening for redirect URI at $REDIR_URL ..."
+  echo "[INFO]   # Ctrl-C to abort and input code manually #"
+  CODE=$(nc -q 5 -w 1 -l 1337 <<<$REPLY |head -n1 |grep -Po "code=\K[^ ]+")
+  
+  if [ -z "$CODE" ]; then
+    read -p "[INPUT]  Enter code: " CODE 
+  fi
   echo
-  AUTH=$(curl -s -d "grant_type=authorization_code&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET&code=$CODE&redirect_uri=https://$REDIR_URL/netatmo.php&scope=read_station" "https://api.netatmo.net/oauth2/token") 
+  AUTH=$(curl -s -d "grant_type=authorization_code&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET&code=$CODE&redirect_uri=${REDIR_URL}&scope=read_station" "https://api.netatmo.net/oauth2/token") 
   return=$(jq -r '.error|tostring' <<<$AUTH)
   if [ $return != "null" ]; then
-    echo "Login failed ($return), try again! (Bad user/pass or CLIENT ID/SECRET)"
+    echo "[ERROR]  Login failed ($return), try again! (Bad user/pass or CLIENT ID/SECRET)"
     exit 1 
   fi 
   echo $AUTH > .atmo_auth   
@@ -46,7 +75,7 @@ function refreshAuth
   fi
   return=$(jq -r '.error|tostring' <<<$AUTH)
   if [ $return != "null" ]; then
-    echo "Refresh token failed ($return)"
+    echo "[ERROR]  Refresh token failed ($return)"
     exit 1 
   fi 
   echo $AUTH > .atmo_auth   
@@ -59,11 +88,11 @@ function checkToken
   if [ -f .atmo_auth ]; then
     tokenLife=$(( $(date +"%s") - $(stat -c %Y .atmo_auth) ))
     if [ $DEBUG -eq 1 ]; then 
-      echo "DEBUG: TokenLife: $tokenLife Exp: $EXPIRE"
+      echo "[DEBUG]  TokenLife: $tokenLife Exp: $EXPIRE"
     fi
     if [ $tokenLife -ge $EXPIRE ]; then
       if [ $DEBUG -eq 1 ]; then 
-	echo "Access token time expired, refreshing token..."
+	echo "[DEBUG]  Access token time expired, refreshing token..."
       fi
       refreshAuth
       readToken
@@ -74,14 +103,14 @@ function checkToken
 function readToken
 {
   if [ ! -f .atmo_auth ]; then
-    echo "No authorization file found, Netatmo login required:"
+    echo "[INFO]   No authorization file found, Netatmo login required:"
     loginAuth
   fi
   AUTH=$(cat .atmo_auth) 
   REFRESH=$(jq -r '.refresh_token|tostring' <<<$AUTH) 
   TOKEN=$(jq -r '.access_token|tostring' <<<$AUTH) 
   if [ $DEBUG -eq 1 ]; then 
-    echo "DEBUG: $TOKEN $REFRESH"
+    echo "[DEBUG]  $TOKEN $REFRESH"
   fi
 }
 
@@ -93,19 +122,19 @@ function getData
   if [ $return != "null" ]; then
     if [ $return == "3" ]; then
       if [ $DEBUG -eq 1 ]; then 
-        echo "Access token expired, refreshing token..."
+        echo "[DEBUG]  Access token expired, refreshing token..."
       fi
       refreshAuth
       getData
     elif [ $return == "2" ]; then
       if [ $DEBUG -eq 1 ]; then 
-        echo "Invalid Access token, refreshing token..."
+        echo "[DEBUG]  Invalid Access token, refreshing token..."
       fi
       refreshAuth
       getData
     else
       message=$(jq -r '.error.message|tostring' <<<$DATA)
-      echo "Unable to get data, error: $return ($message)"
+      echo "[ERROR]  Unable to get data, error: $return ($message)"
       exit 1 
     fi
   fi 
@@ -120,6 +149,8 @@ getData
 ##Dump entire table (DEBUG)
 #jq <<<$DATA
 
+HOME_NAME=$(jq -r .body.devices[0].home_name <<<$DATA)
+
 I_TEMP=$(jq .body.devices[0].dashboard_data.Temperature <<<$DATA)
 I_HUMI=$(jq .body.devices[0].dashboard_data.Humidity <<<$DATA)
 I_CO2=$(jq .body.devices[0].dashboard_data.CO2 <<<$DATA)
@@ -128,15 +159,32 @@ O_TEMP=$(jq .body.devices[0].modules[0].dashboard_data.Temperature <<<$DATA)
 O_HUMI=$(jq .body.devices[0].modules[0].dashboard_data.Humidity <<<$DATA)
 O_PRES=$(jq .body.devices[0].dashboard_data.Pressure <<<$DATA)
 
+DATE=$(date "+%Y-%m-%d %H:%M:%S")
+DATE_ISO8601=$(date --utc "+%Y-%m-%dT%H:%M:%SZ")
+
+#
+# Store data in CSV file
+# 
+# CSV file is named as netatmo body.devices[0].home_name
+#
+echo "[INFO]   Values stored in $HOME_NAME.csv"
+# Create file with header if missing
+if ! [ -f "$HOME_NAME.csv" ]; then
+  echo "Date,Indoor Temp,Indoor Humidity,Indoor CO2, Outdoor Temp,Outdoor Humidity, Pressure" > "$HOME_NAME.csv" 
+fi
+echo "$DATE_ISO8601,$I_TEMP,$I_HUMI,$I_CO2,$O_TEMP,$O_HUMI,$O_PRES" >> "$HOME_NAME.csv"
 
 #### Print out
 if [ $PRINT -eq 1 ]; then 
-  echo "------------------------ Indoor ------------------------------------------"
+  echo
+  echo -n "----------------------------- Indoor --------------[$DATE]--"
+  echo -e "\r--[$HOME_NAME]"
   echo " Temperature: $I_TEMP C | Humidity: $I_HUMI % | CO2: $I_CO2 ppm"
-  echo "------------------------ Outdoor -----------------------------------------"
+  echo "----------------------------- Outdoor ------------------------------------"
   echo " Temperature: $O_TEMP C | Humidity: $O_HUMI % | Pressure: $O_PRES mb" 
   echo "--------------------------------------------------------------------------"
 fi
+
 
 exit 0
 
