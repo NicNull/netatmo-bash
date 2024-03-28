@@ -1,5 +1,5 @@
 #!/bin/bash
-## Netatmo bash script  
+## Netatmo bash script to get weather station data. 
 ## Bash script for getting data from netatmo API and handling OATH access and refresh tokens. 
 ## Handles new OATH method required after April 2024 API update.
 ##
@@ -7,7 +7,6 @@
 ##
 ## Requirements before even trying to start script:
 ## Get the CLIENT_ID/SECRET by login to dev.netatmo.com myApps/Create 
-## Station MAC address is avialable in my.netatmo.com Settings/Manage Home/RoomName/MAC Address
 ## 
 ## For login redirect URI a local listening socket is used for the OATH process.
 ## This requires script to be run on the same host as the webbrowser used for auth.
@@ -16,7 +15,6 @@
 ##
 
 REDIR_URL="http://127.0.0.1:1337"
-STATION="##:##:##:##:##:##"
 CLIENT_ID="########################"
 CLIENT_SECRET="###################################"
 PRINT=1
@@ -114,6 +112,32 @@ function readToken
   fi
 }
 
+function getHomeData
+{
+  checkToken
+  HOME_DATA=$(curl -s -d "access_token=$TOKEN" https://app.netatmo.net/api/homesdata?app_type=app_magellan&gateway_types=["NAMain"])
+  return=$(jq -r '.error.code' <<<$HOME_DATA)
+  if [ $return != "null" ]; then
+    if [ $return == "3" ]; then
+      if [ $DEBUG -eq 1 ]; then
+        echo "[DEBUG]  Access token expired, refreshing token..."
+      fi
+      refreshAuth
+      getHomeData
+    elif [ $return == "2" ]; then
+      if [ $DEBUG -eq 1 ]; then
+        echo "[DEBUG]  Invalid Access token, refreshing token..."
+      fi
+      refreshAuth
+      getHomeData
+    else
+      message=$(jq -r '.error.message|tostring' <<<$HOME_DATA)
+      echo "[ERROR]  Unable to get homesdata, error: $return ($message)"
+      exit 1
+    fi
+  fi
+}
+
 function getData
 {
   checkToken
@@ -144,9 +168,17 @@ function getData
 ## Start script
 ##
 
+## Locate STATION ID from homesdata API
+getHomeData
+# Dump entire table (DEBUG)
+#jq <<<$HOME_DATA
+
+STATION=$(jq -r .body.homes[0].modules[0].id <<<$HOME_DATA)
+
+## Fetch measurement data
 getData
 
-##Dump entire table (DEBUG)
+# Dump entire table (DEBUG)
 #jq <<<$DATA
 
 HOME_NAME=$(jq -r .body.devices[0].home_name <<<$DATA)
@@ -167,15 +199,17 @@ DATE_ISO8601=$(date --utc "+%Y-%m-%dT%H:%M:%SZ")
 # 
 # CSV file is named as netatmo body.devices[0].home_name
 #
-echo "[INFO]   Values stored in $HOME_NAME.csv"
+
 # Create file with header if missing
 if ! [ -f "$HOME_NAME.csv" ]; then
   echo "Date,Indoor Temp,Indoor Humidity,Indoor CO2, Outdoor Temp,Outdoor Humidity, Pressure" > "$HOME_NAME.csv" 
 fi
 echo "$DATE_ISO8601,$I_TEMP,$I_HUMI,$I_CO2,$O_TEMP,$O_HUMI,$O_PRES" >> "$HOME_NAME.csv"
 
+
 #### Print out
 if [ $PRINT -eq 1 ]; then 
+  echo "[INFO]   Values stored in $HOME_NAME.csv"
   echo
   echo -n "----------------------------- Indoor --------------[$DATE]--"
   echo -e "\r--[$HOME_NAME]"
@@ -184,7 +218,6 @@ if [ $PRINT -eq 1 ]; then
   echo " Temperature: $O_TEMP C | Humidity: $O_HUMI % | Pressure: $O_PRES mb" 
   echo "--------------------------------------------------------------------------"
 fi
-
 
 exit 0
 
