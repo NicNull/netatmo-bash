@@ -14,7 +14,8 @@
 ## http://127.0.0.1:1337/?code=<your code is here>
 ##
 
-REDIR_URL="http://127.0.0.1:1337"
+REDIR_HOST="127.0.0.1"
+REDIR_PORT="1337"
 CLIENT_ID="########################"
 CLIENT_SECRET="###################################"
 PRINT=1
@@ -36,6 +37,7 @@ REPLY=$(cat <<EOF
 HTTP/1.1 303 Found
 Location: https://home.netatmo.com/
 Content-Type: text/html
+Cache-Control: max-age=0
 EOF
 )
 
@@ -44,13 +46,18 @@ EOF
 #
 function loginAuth
 {
+  REDIR_URL="http://$REDIR_HOST:$REDIR_PORT"
   echo "[INFO]   Go to this URL to get auth code:"
   echo "[ACTION] https://api.netatmo.com/oauth2/authorize?client_id=$CLIENT_ID&redirect_uri=${REDIR_URL}&scope=read_station" 
   echo
   echo "[LOGIN]  Listening for redirect URI at $REDIR_URL ..."
   echo "[INFO]   # Ctrl-C to abort and input code manually #"
-  CODE=$(nc -q 5 -w 1 -l 1337 <<<$REPLY |head -n1 |grep -Po "code=\K[^ ]+")
-  
+  CODE=$(nc -q 5 -w 2 -l $REDIR_HOST $REDIR_PORT <<<$REPLY |head -n1)
+  CODE=$(grep -Po "code=\K[^ ]+" <<<$CODE)
+  if [ $DEBUG -eq 1 ]; then
+    echo "[DEBUG]  CODE: $CODE"
+  fi
+    
   if [ -z "$CODE" ]; then
     read -p "[INPUT]  Enter code: " CODE 
   fi
