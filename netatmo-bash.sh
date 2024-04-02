@@ -168,6 +168,12 @@ function getData
 ## Start script
 ##
 
+## set CWD to script location
+cd $(realpath $(dirname $0))
+if [ $DEBUG -eq 1 ]; then
+  echo "[DEBUG]  CWD is set to: $(pwd)"
+fi
+
 ## Locate STATION ID from homesdata API
 getHomeData
 # Dump entire table (DEBUG)
@@ -211,8 +217,10 @@ echo "$DATE_ISO8601,$I_TEMP,$I_HUMI,$I_CO2,$O_TEMP,$O_HUMI,$O_PRES" >> "$HOME_NA
 if [ $PRINT -eq 1 ]; then 
   echo "[INFO]   Values stored in $HOME_NAME.csv"
   echo
-  echo -n "----------------------------- Indoor --------------[$DATE]--"
-  echo -e "\r--[$HOME_NAME]"
+  echo "--------------------------------------------------------------------------"
+  echo -n "                              Indoor               [$DATE] -"
+  echo -e "\r- [$HOME_NAME]"
+  echo "--------------------------------------------------------------------------"
   echo " Temperature: $I_TEMP C | Humidity: $I_HUMI % | CO2: $I_CO2 ppm"
   echo "----------------------------- Outdoor ------------------------------------"
   echo " Temperature: $O_TEMP C | Humidity: $O_HUMI % | Pressure: $O_PRES mb" 
