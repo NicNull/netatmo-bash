@@ -221,10 +221,16 @@ function getData
 #
 function getModuleStatus {
   seenFail=0
+  #RF quality
+  declare -A RF_Q
+  RF_Q["Bad"]=86
+  RF_Q["Avg"]=71
+  RF_Q["Good"]=56
+
   ## Get modules device info
   if [ $PRINT -eq 1 ]; then 
-	  printf "%2s| %-15s | %-7s | %-5s | %-20s\n" " " "Module" "Battery" "Age" "Last Seen"
-	  printf "%19s-+-%7s-+-%5s-+%20s\n" "-----------------" "-------" "-----" "-[$DATE]-"
+	  printf "%2s| %-15s | %-7s |%-6s| %-5s | %-20s\n" " " "Module" "Battery" "Signal" "Age" "Last Seen"
+	  printf "%19s-+-%7s-+-%4s-+-%5s-+%20s\n" "-----------------" "-------" "----" "-----" "-[$DATE]-"
   fi
   for ((i = 0; i < 20; i++)); do
       NAME=$(jq -r .body.devices[0].modules[$i].module_name <<<$DATA)
@@ -234,6 +240,8 @@ function getModuleStatus {
       BATT=$(jq -r .body.devices[0].modules[$i].battery_percent <<<$DATA)
       LS_T=$(jq -r .body.devices[0].modules[$i].last_seen <<<$DATA)
       LS=$(date -d "@${LS_T}" +"%x %X")
+      
+      # Calculate last seen age and treshold
       AGE=$((DATE_T - LS_T))   
       if [ $AGE -gt $TIME_OK ]; then
     	OK="!"
@@ -241,14 +249,25 @@ function getModuleStatus {
       else 
     	OK=" "
       fi
+      
+      # Get RF signal quality index
+      RF_val=$(jq -r .body.devices[0].modules[$i].rf_status <<<$DATA)
+      # Locate signal level
+      for rf_key in "${!RF_Q[@]}"; do
+        if [ $RF_val -ge ${RF_Q[$rf_key]} ]; then
+          local RF="$rf_key"
+          break
+        fi
+      done  
+      
       if [ $PRINT -eq 1 ]; then 
-        printf "%-2s| %-15s | %-7s | %-5s | %-20s\n" "$OK" "$NAME" "$BATT %" "$AGE s" " $LS"
+        printf "%-2s| %-15s | %-7s | %-4s | %-5s | %-20s\n" "$OK" "$NAME" "$BATT %" "$RF" "$AGE s" " $LS"
       elif [ $PRINT -eq 0 ] && [ "$OK" == "!" ]; then
-        echo "[UNREACH] $NAME: Battery: $BATT %, Age: $AGE s, Last Seen: $LS"
+        echo "[UNREACH] $NAME: Battery: $BATT %, Signal: $RF, Age: $AGE s, Last Seen: $LS"
       fi
   done
   if [ $PRINT -eq 1 ]; then 
-    printf "%19s-+-%7s-+-%5s-+-%20s\n" "-----------------" "-------" "-----" "----------------------"
+    printf "%19s-+-%7s-+-%4s-+-%5s-+-%20s\n" "-----------------" "-------" "----" "-----" "----------------------"
   fi
   return $seenFail
 }

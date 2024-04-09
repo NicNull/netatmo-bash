@@ -4,7 +4,7 @@ Bash script for getting data from netatmo API and handling OATH access and refre
 Handles new OATH method required after May 2024 API update.  
 
 ## Script options
-The script has also support for fetching battery operated modules battery level and last seen timestamp.  
+The script has also support for fetching battery operated modules battery level, RF signal quality and last seen timestamp.  
 Devices is marked with a "!" if last seen timestamp is older than 15 minutes, script will exit with return code 1.  
 For running the script via crond, a quiet option "-q" or "--quiet" exist that only prints output on errors and module time out.  
 The entire json response from the Netatmo API call can be stored in given filename using -j or --json option.  
@@ -57,31 +57,32 @@ $ ./netatmo-bash.sh
  
 Device status list:
 ``` 
-$ ./netatmo-bash.sh --device-status
-  | Module          | Battery | Age   | Last Seen           
-  ------------------+---------+-------+-[2024-04-08 16:35:00]-  <-- (Current time)
-  | Outside         | 54 %    | 244 s |  2024-04-08 16:30:56
-  | Patio           | 66 %    | 237 s |  2024-04-08 16:31:03
-  | Rainguage       | 61 %    | 231 s |  2024-04-08 16:31:09
-  | Windguage       | 57 %    | 231 s |  2024-04-08 16:31:09
-  ------------------+---------+-------+-----------------------
+$ ./my-netatmo.sh --device-status
+  | Module          | Battery |Signal| Age   | Last Seen           
+  ------------------+---------+------+-------+-[2024-04-09 10:47:19]-  <-- (Current time)
+  | Outside         | 54 %    | Good | 566 s |  2024-04-09 10:37:53
+  | Patio           | 66 %    | Good | 559 s |  2024-04-09 10:38:00
+  | Rainguage       | 61 %    | Avg  | 527 s |  2024-04-09 10:38:32
+  | Windguage       | 57 %    | Good | 521 s |  2024-04-09 10:38:38
+  ------------------+---------+------+-------+-----------------------
+  
 ```
 
 Device status when TIME_OK is passed for module Outside:
 ```
-$ ./netatmo-bash.sh --device-status
-  | Module          | Battery | Age   | Last Seen           
-  ------------------+---------+-------+-[2024-04-08 16:41:07]-
-! | Outside         | 54 %    | 911 s |  2024-04-08 16:22:56
-  | Patio           | 66 %    | 604 s |  2024-04-08 16:31:03
-  | Rainguage       | 61 %    | 598 s |  2024-04-08 16:31:09
-  | Windguage       | 57 %    | 598 s |  2024-04-08 16:31:09
-  ------------------+---------+-------+-----------------------
+$ ./my-netatmo.sh --device-status
+  | Module          | Battery |Signal| Age   | Last Seen           
+  ------------------+---------+------+-------+-[2024-04-09 10:47:19]-  <-- (Current time)
+! | Outside         | 54 %    | Bad  | 966 s |  2024-04-09 10:27:53
+  | Patio           | 66 %    | Good | 559 s |  2024-04-09 10:38:00
+  | Rainguage       | 61 %    | Avg  | 527 s |  2024-04-09 10:38:32
+  | Windguage       | 57 %    | Good | 521 s |  2024-04-09 10:38:38
+  ------------------+---------+------+-------+-----------------------
 ```
 Device status for timeout in --quiet mode:
 ```
 $ ./netatmo-bash.sh --device-status --quiet
-[UNREACH] Outside: Battery: 54 %, Age: 903 s, Last Seen: 2024-04-08 16:50:35
+[UNREACH] Outside: Battery: 54 %, Signal: Bad, Age: 903 s, Last Seen: 2024-04-08 16:50:35
 
 ```
 
