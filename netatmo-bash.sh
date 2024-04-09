@@ -2,6 +2,7 @@
 ## Netatmo bash script to get weather station data. 
 ## Bash script for getting data from netatmo API and handling OATH access and refresh tokens. 
 ## Handles new OATH method required after April 2024 API update.
+## See README.md for more details
 ##
 ## https://github.com/NicNull/netatmo-bash
 ##
@@ -14,12 +15,56 @@
 ## http://127.0.0.1:1337/?code=<your code is here>
 ##
 
-REDIR_HOST="127.0.0.1"
-REDIR_PORT="1337"
+# Set these to your keys:
 CLIENT_ID="########################"
 CLIENT_SECRET="###################################"
+
+# Script parameters
+REDIR_HOST="127.0.0.1"
+REDIR_PORT="1337"
 PRINT=1
 DEBUG=0
+DEVICE_STATUS=0
+JSON_FILE=""
+# Seconds since last seen to be considered OK (default 15m)
+TIME_OK=900   
+
+# Loop through command-line arguments
+while [ $# -gt 0 ]; do
+    case "$1" in
+        '--device-status' | '-s')
+            DEVICE_STATUS=1
+            ;;
+        '-q' | '--quiet')
+            PRINT=0
+            ;;
+        '-j' | '--json')
+            if [ -n "$2" ]; then
+		JSON_FILE="$2"
+            	shift
+            else
+            	echo "[ERROR]  Option $1 needs an argument!"
+            	exit 1
+            fi
+            ;;
+        '--debug')
+            DEBUG=1
+            ;;
+        '--help' | '-h')
+            echo "Usage: $(basename "$0") [-s|--device-status] [-q|--quiet] [-j|--json <filename>] [--debug] [-h|--help]" >&2
+            echo "                        -s, --device-status : Get available device status" >&2
+            echo "                                -q, --quiet : Do not print values (cron mode)" >&2
+            echo "                                 -j, --json : Save Netatmo json data API reply in <filename>" >&2
+            echo "                                    --debug : Print dubug information" >&2
+            exit 1 
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+    shift  # Move to the next argument
+done
 
 # Function to handle Ctrl-C (SIGINT)
 cleanup() {
@@ -171,9 +216,50 @@ function getData
   fi 
 }
 
+#
+# Get battery operated modules battery and last seen information
+#
+function getModuleStatus {
+  seenFail=0
+  ## Get modules device info
+  if [ $PRINT -eq 1 ]; then 
+	  printf "%2s| %-15s | %-7s | %-5s | %-20s\n" " " "Module" "Battery" "Age" "Last Seen"
+	  printf "%19s-+-%7s-+-%5s-+%20s\n" "-----------------" "-------" "-----" "-[$DATE]-"
+  fi
+  for ((i = 0; i < 20; i++)); do
+      NAME=$(jq -r .body.devices[0].modules[$i].module_name <<<$DATA)
+      if [ "$NAME" == "null" ]; then
+	break
+      fi
+      BATT=$(jq -r .body.devices[0].modules[$i].battery_percent <<<$DATA)
+      LS_T=$(jq -r .body.devices[0].modules[$i].last_seen <<<$DATA)
+      LS=$(date -d "@${LS_T}" +"%x %X")
+      AGE=$((DATE_T - LS_T))   
+      if [ $AGE -gt $TIME_OK ]; then
+    	OK="!"
+    	seenFail=1
+      else 
+    	OK=" "
+      fi
+      if [ $PRINT -eq 1 ]; then 
+        printf "%-2s| %-15s | %-7s | %-5s | %-20s\n" "$OK" "$NAME" "$BATT %" "$AGE s" " $LS"
+      elif [ $PRINT -eq 0 ] && [ "$OK" == "!" ]; then
+        echo "[UNREACH] $NAME: Battery: $BATT %, Age: $AGE s, Last Seen: $LS"
+      fi
+  done
+  if [ $PRINT -eq 1 ]; then 
+    printf "%19s-+-%7s-+-%5s-+-%20s\n" "-----------------" "-------" "-----" "----------------------"
+  fi
+  return $seenFail
+}
+
+
 ##
 ## Start script
 ##
+DATE=$(date "+%Y-%m-%d %H:%M:%S")
+DATE_ISO8601=$(date --utc "+%Y-%m-%dT%H:%M:%SZ")
+DATE_T=$(date "+%s")
 
 ## set CWD to script location
 cd $(realpath $(dirname $0))
@@ -191,8 +277,19 @@ STATION=$(jq -r .body.homes[0].modules[0].id <<<$HOME_DATA)
 ## Fetch measurement data
 getData
 
-# Dump entire table (DEBUG)
-#jq <<<$DATA
+if [ $DEVICE_STATUS -eq 1 ]; then
+  getModuleStatus
+  exit $?
+fi
+
+
+# Dump entire json table
+if [ -n "$JSON_FILE" ]; then
+  if [ $PRINT -eq 1 ]; then
+    echo "[INFO]   Storing json data in $JSON_FILE"
+  fi
+  jq <<<$DATA > $JSON_FILE
+fi
 
 HOME_NAME=$(jq -r .body.devices[0].home_name <<<$DATA)
 
@@ -204,8 +301,6 @@ O_TEMP=$(jq .body.devices[0].modules[0].dashboard_data.Temperature <<<$DATA)
 O_HUMI=$(jq .body.devices[0].modules[0].dashboard_data.Humidity <<<$DATA)
 O_PRES=$(jq .body.devices[0].dashboard_data.Pressure <<<$DATA)
 
-DATE=$(date "+%Y-%m-%d %H:%M:%S")
-DATE_ISO8601=$(date --utc "+%Y-%m-%dT%H:%M:%SZ")
 
 #
 # Store data in CSV file
@@ -224,14 +319,13 @@ echo "$DATE_ISO8601,$I_TEMP,$I_HUMI,$I_CO2,$O_TEMP,$O_HUMI,$O_PRES" >> "$HOME_NA
 if [ $PRINT -eq 1 ]; then 
   echo "[INFO]   Values stored in $HOME_NAME.csv"
   echo
-  echo "--------------------------------------------------------------------------"
-  echo -n "                              Indoor               [$DATE] -"
-  echo -e "\r- [$HOME_NAME]"
-  echo "--------------------------------------------------------------------------"
-  echo " Temperature: $I_TEMP C | Humidity: $I_HUMI % | CO2: $I_CO2 ppm"
-  echo "----------------------------- Outdoor ------------------------------------"
-  echo " Temperature: $O_TEMP C | Humidity: $O_HUMI % | Pressure: $O_PRES mb" 
-  echo "--------------------------------------------------------------------------"
+  echo "-------------------------------------------------------------------"
+  printf " [%-22s                     %20s] \n" "${HOME_NAME}]" "[${DATE}"
+  echo "-------------------------- Indoor ---------------------------------"
+  printf " Temperature: %-5s°C |  Humidity: %-3s%% |  CO2: %s ppm \n" "$I_TEMP" "$I_HUMI" "$I_CO2"
+  echo "-------------------------- Outdoor --------------------------------"
+  printf " Temperature: %-5s°C |  Humidity: %-3s%% |  Pressure: %s mb \n" "$O_TEMP" "$O_HUMI" "$O_PRES" 
+  echo "-------------------------------------------------------------------"
 fi
 
 exit 0
