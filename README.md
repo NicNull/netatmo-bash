@@ -13,6 +13,7 @@ Usage: netatmo-bash.sh [-s|--device-status] [-q|--quiet] [-j|--json <filename>] 
                         -s, --device-status : Get available device status
                                 -q, --quiet : Do not print values (cron mode)
                                  -j, --json : Save Netatmo json data API reply in <filename>
+                              --manual-code : No auto capture of OATH return code or redirect is done
                                     --debug : Print dubug information
 
 ```
@@ -29,7 +30,12 @@ Update the corresponding script variables CLIENT_ID and CLIENT_SECRET to yours.
 
 For login redirect URI a local listening socket is used for the OATH process.  
 This requires script to be run on the same host as the webbrowser used for auth.  
-It is also possible to skip auto capture and manually enter the return code copied from the response URI:  
+It is also possible to skip auto capture (option --manual-code) and manually enter the return code copied from the response URI:  
+Pressing Ctrl-C when the redirect auto snoop is active before launching the login URL in the browser will accomplish the same.  
+To exit the code prompt, press Ctrl-C twice.  
+
+Use "--debug" option to show OATH token updates, lifetime and values for troubleshooting.  
+
 ``` 
 http://127.0.0.1:1337/?code=<your code is here>  
 ```
@@ -43,6 +49,7 @@ $ ./netatmo-bash.sh
 
 [LOGIN]  Listening for redirect URI at http://127.0.0.1:1337 ...
 [INFO]   # Ctrl-C to abort and input code manually #
+[INFO]   Code aquired from response URI
 
 [INFO]   Values stored in myNetatmo.csv
 

@@ -11,7 +11,9 @@
 ## 
 ## For login redirect URI a local listening socket is used for the OATH process.
 ## This requires script to be run on the same host as the webbrowser used for auth.
-## It is also possible to skip auto capture and manually enter the return code copied from the response URI:
+## Added --manual-code option to skip auto capture that also skips redirecting to the netatmo dashboard after login.
+## It is also possible to press Ctrl-C to activate the manual code prompt before launching the netatmo login URL in the browser.
+## Just manually enter the return code copied from the response URI:
 ## http://127.0.0.1:1337/?code=<your code is here>
 ##
 
@@ -19,11 +21,13 @@
 CLIENT_ID="########################"
 CLIENT_SECRET="###################################"
 
+
 # Script parameters
 REDIR_HOST="127.0.0.1"
 REDIR_PORT="1337"
 PRINT=1
 DEBUG=0
+MANUAL_CODE=0
 DEVICE_STATUS=0
 JSON_FILE=""
 # Seconds since last seen to be considered OK (default 15m)
@@ -47,6 +51,9 @@ while [ $# -gt 0 ]; do
             	exit 1
             fi
             ;;
+        '--manual-code')
+            MANUAL_CODE=1
+            ;;
         '--debug')
             DEBUG=1
             ;;
@@ -55,6 +62,7 @@ while [ $# -gt 0 ]; do
             echo "                        -s, --device-status : Get available device status" >&2
             echo "                                -q, --quiet : Do not print values (cron mode)" >&2
             echo "                                 -j, --json : Save Netatmo json data API reply in <filename>" >&2
+            echo "                              --manual-code : No auto capture of OATH return code or redirect is done" >&2
             echo "                                    --debug : Print dubug information" >&2
             exit 1 
             ;;
@@ -68,12 +76,14 @@ done
 
 # Function to handle Ctrl-C (SIGINT)
 cleanup() {
-    echo -e "\r[WARN]   Aborted redirect URI snoop."
+    if [ $MANUAL_CODE -eq 0 ]; then
+	    echo -e "\r[WARN]   Aborted redirect URI snoop."
+    else
+	    echo -e "\r[WARN]   Ctrl-C Pressed. Press again to quit, Enter to continue"
+    fi
     trap - SIGINT
 }
 
-# Trap Ctrl-C and call the cleanup function
-trap cleanup SIGINT
 
 #
 # URI redirect response
@@ -95,17 +105,28 @@ function loginAuth
   echo "[INFO]   Go to this URL to get auth code:"
   echo "[ACTION] https://api.netatmo.com/oauth2/authorize?client_id=$CLIENT_ID&redirect_uri=${REDIR_URL}&scope=read_station" 
   echo
-  echo "[LOGIN]  Listening for redirect URI at $REDIR_URL ..."
-  echo "[INFO]   # Ctrl-C to abort and input code manually #"
-  CODE=$(nc -q 5 -w 2 -l $REDIR_HOST $REDIR_PORT <<<$REPLY |head -n1)
-  CODE=$(grep -Po "code=\K[^ ]+" <<<$CODE)
-  if [ $DEBUG -eq 1 ]; then
-    echo "[DEBUG]  CODE: $CODE"
-  fi
-    
-  if [ -z "$CODE" ]; then
-    read -p "[INPUT]  Enter code: " CODE 
-  fi
+  # Trap Ctrl-C and call the cleanup function
+  trap cleanup SIGINT
+  if [ $MANUAL_CODE -eq 0 ]; then
+	echo "[LOGIN]  Listening for redirect URI at $REDIR_URL ..."
+	echo "[INFO]   # Ctrl-C to abort and input code manually #"
+	CODE=$(nc -q 5 -w 2 -l $REDIR_HOST $REDIR_PORT <<<$REPLY |head -n1)
+	CODE=$(grep -Po "code=\K[^ ]+" <<<$CODE)
+	if [ -n "$CODE" ]; then
+	  echo "[INFO]   Code aquired from response URI" 
+	fi
+	if [ $DEBUG -eq 1 ]; then
+	  echo "[DEBUG]  CODE: $CODE"
+	fi
+  else
+	echo "[INFO]   Manually enter the return code shown in the response URI after login:"
+        echo "[INFO]   http://127.0.0.1:1337/?code=<your code is here>"
+  fi  
+  while [ -z "$CODE" ]; do
+    MANUAL_CODE=1
+    trap cleanup SIGINT
+    read -p "[INPUT]  Enter code: " CODE
+  done
   echo
   AUTH=$(curl -s -d "grant_type=authorization_code&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET&code=$CODE&redirect_uri=${REDIR_URL}&scope=read_station" "https://api.netatmo.net/oauth2/token") 
   return=$(jq -r '.error|tostring' <<<$AUTH)
