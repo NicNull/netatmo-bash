@@ -181,14 +181,15 @@ function readToken
   REFRESH=$(jq -r '.refresh_token|tostring' <<<$AUTH) 
   TOKEN=$(jq -r '.access_token|tostring' <<<$AUTH) 
   if [ $DEBUG -eq 1 ]; then 
-    echo "[rT DEBUG]  $TOKEN $REFRESH"
+    echo "[DEBUG]  $TOKEN $REFRESH"
   fi
 }
 
 function getHomeData
 {
   checkToken
-  HOME_DATA=$(curl -s -d "access_token=$TOKEN" https://app.netatmo.net/api/homesdata?app_type=app_magellan&gateway_types=["NAMain"])
+  ## New API request format for homesdata via .com endpoint.
+  HOME_DATA=$(curl -sX GET "https://api.netatmo.com/api/homesdata" -H "accept: application/json" -H "Authorization: Bearer $TOKEN")
   return=$(jq -r '.error.code' <<<$HOME_DATA)
   if [ $return != "null" ]; then
     if [ $return == "3" ]; then
@@ -308,7 +309,7 @@ if [ $DEBUG -eq 1 ]; then
 fi
 
 ## Locate STATION ID from homesdata API 
-## (seem to use netatmo.net still, homesdata api do not return anything on netatmo.com endpoint)
+## (Updated to use homesdata via the netatmo.com endpoint)
 getHomeData
 # Dump entire table (DEBUG)
 #jq <<<$HOME_DATA
