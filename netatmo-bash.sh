@@ -128,7 +128,7 @@ function loginAuth
     read -p "[INPUT]  Enter code: " CODE
   done
   echo
-  AUTH=$(curl -s -d "grant_type=authorization_code&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET&code=$CODE&redirect_uri=${REDIR_URL}&scope=read_station" "https://api.netatmo.net/oauth2/token") 
+  AUTH=$(curl -s -d "grant_type=authorization_code&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET&code=$CODE&redirect_uri=${REDIR_URL}&scope=read_station" "https://api.netatmo.com/oauth2/token") 
   return=$(jq -r '.error|tostring' <<<$AUTH)
   if [ $return != "null" ]; then
     echo "[ERROR]  Login failed ($return), try again! (Bad user/pass or CLIENT ID/SECRET)"
@@ -139,7 +139,7 @@ function loginAuth
 
 function refreshAuth
 {
-  AUTH=$(curl -s -d "grant_type=refresh_token&refresh_token=$REFRESH&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET" "https://api.netatmo.net/oauth2/token") 
+  AUTH=$(curl -s -d "grant_type=refresh_token&refresh_token=$REFRESH&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET" "https://api.netatmo.com/oauth2/token") 
   if [ $DEBUG -eq 1 ]; then 
     #DEBUG dump
     jq <<<$AUTH
@@ -163,7 +163,7 @@ function checkToken
     fi
     if [ $tokenLife -ge $EXPIRE ]; then
       if [ $DEBUG -eq 1 ]; then 
-	echo "[DEBUG]  Access token time expired, refreshing token..."
+	      echo "[DEBUG]  Access token time expired, refreshing token..."
       fi
       refreshAuth
       readToken
@@ -181,7 +181,7 @@ function readToken
   REFRESH=$(jq -r '.refresh_token|tostring' <<<$AUTH) 
   TOKEN=$(jq -r '.access_token|tostring' <<<$AUTH) 
   if [ $DEBUG -eq 1 ]; then 
-    echo "[DEBUG]  $TOKEN $REFRESH"
+    echo "[rT DEBUG]  $TOKEN $REFRESH"
   fi
 }
 
@@ -214,7 +214,7 @@ function getHomeData
 function getData
 {
   checkToken
-  DATA=$(curl -s -d "access_token=$TOKEN&device_id=$STATION" "https://api.netatmo.net/api/getstationsdata") 
+  DATA=$(curl -s -d "access_token=$TOKEN&device_id=$STATION" "https://api.netatmo.com/api/getstationsdata") 
   return=$(jq -r '.error.code' <<<$DATA)
   if [ $return != "null" ]; then
     if [ $return == "3" ]; then
@@ -307,13 +307,16 @@ if [ $DEBUG -eq 1 ]; then
   echo "[DEBUG]  CWD is set to: $(pwd)"
 fi
 
-## Locate STATION ID from homesdata API
+## Locate STATION ID from homesdata API 
+## (seem to use netatmo.net still, homesdata api do not return anything on netatmo.com endpoint)
 getHomeData
 # Dump entire table (DEBUG)
 #jq <<<$HOME_DATA
 
 STATION=$(jq -r .body.homes[0].modules[0].id <<<$HOME_DATA)
-
+if [ $DEBUG -eq 1 ]; then
+  echo "[DEBUG]  STATION: $STATION"
+fi
 ## Fetch measurement data
 getData
 
