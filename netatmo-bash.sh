@@ -188,8 +188,8 @@ function readToken
 function getHomeData
 {
   checkToken
-  ## New API request format for homesdata via .com endpoint.
-  HOME_DATA=$(curl -sX GET "https://api.netatmo.com/api/homesdata" -H "accept: application/json" -H "Authorization: Bearer $TOKEN")
+  ## Updated homesdata via api.netatmo.com endpoint.
+  HOME_DATA=$(curl -s -d "access_token=$TOKEN" https://api.netatmo.com/api/homesdata)
   return=$(jq -r '.error.code' <<<$HOME_DATA)
   if [ $return != "null" ]; then
     if [ $return == "3" ]; then
